@@ -1,21 +1,27 @@
-/* CONTACT-INFO CRAWLER
+/* QUICK CONTACT-ONLY CRAWLER
 --------------------------------------------------- */
-import { Dataset } from 'crawlee';
-import { PlaywrightCrawler } from 'crawlee';
+import { PlaywrightCrawler, Dataset } from 'crawlee';
 
-export async function contactCrawler(startUrl) {
-  const emailRegex  = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-  const phoneRegex  = /(\+?\d[\d\-\s]{7,}\d)/g;
+export async function contactCrawler(startUrl, runId) {
+  const dataset = await Dataset.open(runId);
+
+  const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+  const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
 
   const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl: 5,
-    async requestHandler({ page, request, enqueueLinks, pushData }) {
-      const html = await page.content();
+    async requestHandler({ page, request, enqueueLinks }) {
+      const html   = await page.content();
+      const emails = [...new Set(html.match(emailRx)  || [])];
+      const phones = [...new Set(html.match(phoneRx) || [])];
 
-      const emails = [...new Set(html.match(emailRegex)  || [])];
-      const phones = [...new Set(html.match(phoneRegex) || [])];
+      await dataset.pushData({
+        url: request.url,
+        emails,
+        phones,
+        contactFound: emails.length || phones.length
+      });
 
-      await pushData({ url: request.url, emails, phones });
       await enqueueLinks({ strategy: 'same-domain' });
     }
   });
