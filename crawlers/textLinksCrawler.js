@@ -1,15 +1,17 @@
-/* TEXT + LINKS CRAWLER  (flexible options + advanced extraction)
---------------------------------------------------------------- */
-import { PlaywrightCrawler, Dataset } from 'crawlee'; // RequestQueue is NIET nodig voor maxDepth
+import { PlaywrightCrawler, Dataset } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
   // My comment: open separate datasets for items & errors
   const itemsDs = await Dataset.open(runId);
   const errorDs = await Dataset.open(`${runId}-errors`);
 
+  // Haal de maxDepth uit de options, of gebruik 3 als default.
+  // Deze variabele gebruiken we ZELF om de diepte te controleren.
+  const maxDepth = options.maxDepth ?? 3;
+
   const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 5,
-    maxDepth:              options.maxDepth            ?? 3, // <--- DEZE LIJN MOET HIER STAAN EN WERKEN MET CRAWLEE 3.9.0
+    // maxDepth:              options.maxDepth            ?? 3, // <--- DEZE LIJN MOET ABSOLUUT VERWIJDERD WORDEN!
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
     ignoreRobotsTxt:       true,
@@ -64,7 +66,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
       const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
       const emails = [...new Set(text.match(emailRx)  || [])];
-      const phones = [...Set(text.match(phoneRx) || [])];
+      const phones = [...new Set(text.match(phoneRx) || [])];
 
       // My comment: push data only on first try
       if (request.retryCount === 0) {
@@ -88,11 +90,15 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       const delay = options.delayMillis ?? 0;
       if (delay) await new Promise(r => setTimeout(r, delay));
 
-      // My comment: enqueue same-domain links only
-      // De PlaywrightCrawler's maxDepth optie zal de dieptelimiet afhandelen
-      await enqueueLinks({ strategy: 'same-domain' });
+      // My comment: ENQUEUE LINKS ALLEEN ALS DE HUIDIGE DIEPTE KLEINER IS DAN DE MAXIMALE DIEPTE
+      // De 'request' object heeft een 'depth' property die de huidige diepte bijhoudt.
+      if (request.depth < maxDepth) {
+        await enqueueLinks({ strategy: 'same-domain' });
+      }
     }
   });
 
-  await crawler.run([startUrl]);
+  // Bij het starten van de crawler, geef de initiële diepte mee aan de startUrl.
+  // Standaard is de diepte van de eerste request 0.
+  await crawler.run([{ url: startUrl, userData: { depth: 0 } }]);
 }
