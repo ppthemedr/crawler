@@ -1,5 +1,6 @@
 /* CONTACT-INFO CRAWLER
 --------------------------------------------------- */
+import { Dataset } from 'crawlee';
 import { PlaywrightCrawler } from 'crawlee';
 
 export async function contactCrawler(startUrl) {
