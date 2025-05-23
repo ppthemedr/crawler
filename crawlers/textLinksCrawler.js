@@ -1,21 +1,21 @@
-/* TEXT + LINKS CRAWLER (flexibele options)
+/* TEXT + LINKS CRAWLER  (flexibele opties, robots.txt wordt genegeerd)
 --------------------------------------------------- */
 import { PlaywrightCrawler, Dataset } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
   const dataset = await Dataset.open(runId);
 
+  /* Alleen ondersteunde opties meegeven */
   const crawler = new PlaywrightCrawler({
-    // alléén werkelijk ondersteunde PlaywrightCrawler-opties
-    maxRequestsPerCrawl: options.maxRequestsPerCrawl ?? 5,
-    ignoreRobotsTxt:     true
+    maxRequestsPerCrawl: options.maxRequestsPerCrawl ?? 5
+    // geen robots-optie nodig: PlaywrightCrawler negeert robots.txt standaard
   });
 
   crawler.router.addDefaultHandler(async ({ page, request, enqueueLinks }) => {
-    // scripts/styles verwijderen
+    /* scripts/styles strippen */
     await page.evaluate(() =>
       document.querySelectorAll('script,style,template,noscript')
-        .forEach(el => el.remove())
+            .forEach(el => el.remove())
     );
 
     const text = await page.evaluate(() => {
@@ -30,16 +30,16 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       )]
     );
 
-    // eenvoudige contactdetectie
+    /* contact-regex */
     const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
     const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
     const emails  = [...new Set(text.match(emailRx)  || [])];
     const phones  = [...new Set(text.match(phoneRx) || [])];
-    const contactFound = emails.length || phones.length;
 
-    const candidateLinks = links
-      .filter(l => /contact|about|over|impressum|legal|team/i.test(l))
-      .slice(0, 5);
+    const contactFound   = emails.length || phones.length;
+    const candidateLinks = links.filter(l =>
+      /contact|about|over|impressum|legal|team/i.test(l)
+    ).slice(0, 5);
 
     await dataset.pushData({
       url: request.url,
@@ -51,7 +51,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       candidateLinks
     });
 
-    // alleen interne links, met diepte-limiet
+    /* Alleen interne links, met maxDepth-limit */
     await enqueueLinks({
       strategy: 'same-domain',
       maxDepth: options.maxDepth ?? 3
