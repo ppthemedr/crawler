@@ -1,0 +1,13 @@
+# Multi-Crawler API
+
+| Route | Method | Body | Beschrijving |
+|-------|--------|------|--------------|
+| `/run` | POST | `{ "crawler_type":"text", "startUrl":"https://voorbeeld.nl" }` | Start een crawl.<br/>Retourneert `datasetId` + `items[]`. |
+| `/datasets/<id>/items?format=json` | GET | – | Ruwe Crawlee-dataset ophalen (fallback). |
+
+**Crawler types**  
+- `text`   → tekst + links + contact-heuristiek  
+- `contact` → alleen e-mail + telefoon  
+- `sitemap` → leest `/sitemap.xml` (géén Playwright nodig)
+
+Deploy-tip: mount **/apify_storage** naar een persistent volume.
