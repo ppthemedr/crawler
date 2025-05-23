@@ -1,21 +1,15 @@
 /* TEXT + LINKS CRAWLER  (flexible options + advanced extraction)
 --------------------------------------------------------------- */
-import { PlaywrightCrawler, Dataset } from 'crawlee'; // <--- RequestQueue is NOT needed here for maxDepth
+import { PlaywrightCrawler, Dataset } from 'crawlee'; // RequestQueue is NIET nodig voor maxDepth
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
   // My comment: open separate datasets for items & errors
   const itemsDs = await Dataset.open(runId);
   const errorDs = await Dataset.open(`${runId}-errors`);
 
-  // My comment: REMOVE the RequestQueue instantiation that caused the error
-  // const requestQueue = await RequestQueue.open({
-  //   maxDepth: options.maxDepth ?? 3,
-  // });
-
   const crawler = new PlaywrightCrawler({
-    // requestQueue, // <--- REMOVE THIS LINE
     maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 5,
-    maxDepth:              options.maxDepth            ?? 3, // <--- Keep maxDepth here, it's a valid PlaywrightCrawler option
+    maxDepth:              options.maxDepth            ?? 3, // <--- DEZE LIJN MOET HIER STAAN EN WERKEN MET CRAWLEE 3.9.0
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
     ignoreRobotsTxt:       true,
@@ -70,7 +64,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
       const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
       const emails = [...new Set(text.match(emailRx)  || [])];
-      const phones = [...new Set(text.match(phoneRx) || [])];
+      const phones = [...Set(text.match(phoneRx) || [])];
 
       // My comment: push data only on first try
       if (request.retryCount === 0) {
@@ -95,7 +89,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       if (delay) await new Promise(r => setTimeout(r, delay));
 
       // My comment: enqueue same-domain links only
-      // The PlaywrightCrawler's maxDepth option will handle the depth limit
+      // De PlaywrightCrawler's maxDepth optie zal de dieptelimiet afhandelen
       await enqueueLinks({ strategy: 'same-domain' });
     }
   });
