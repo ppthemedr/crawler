@@ -1,4 +1,9 @@
-/* TEXT + LINKS CRAWLER – stabiel & beleefd
+/* TEXT + LINKS CRAWLER
+   – prioriteit 1: “contact / over / impressum …”
+   – prioriteit 2: menu-links (<nav>)
+   – optionele delayMillis  + jitter
+   – retries & time-outs
+   – stealth-fingerprints om 302-redirect-trucs te vermijden
 ---------------------------------------------------------------- */
 import {
   PlaywrightCrawler,
@@ -7,43 +12,72 @@ import {
 } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
-  /* datasets */
-  const itemsStore  = await Dataset.open(runId);
-  const errorStore  = await Dataset.open(`${runId}-errors`);
+  /********* 0. Datasets *********/
+  const itemsStore = await Dataset.open(runId);           // resultaten
+  const errorStore = await Dataset.open(`${runId}-errors`); // fouten
 
-  /* crawler */
+  /********* 1. Crawler-instantie *********/
   const crawler = new PlaywrightCrawler({
-    requestHandler: async (ctx) => handler(ctx, itemsStore, errorStore, options),
-    maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 5,
+    requestHandler: ctx => mainHandler(ctx, itemsStore, errorStore, options),
+
+    /* Beleefde limieten + retries */
+    maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 8,
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
+    maxRequestRetries:     options.maxRequestRetries     ?? 3,
     maxConcurrency:        2,
-    maxRequestRetries:     options.maxRequestRetries     ?? 3
+
+    /* Stealth + fingerprint elke nieuwe pagina */
+    browserPoolOptions: {
+      useFingerprints: true,
+      fingerprintOptions: {
+        fingerprintGenerator: { devices: ['desktop'] }    // realistisch
+      },
+      preLaunchHooks: [
+        async (_id, launchCtx) => { launchCtx.launchOptions.stealth = true; }
+      ],
+      postPageCreateHooks: [
+        async (_id, page) => {
+          await page.addInitScript(
+            'Object.defineProperty(navigator,"webdriver",{get:()=>undefined})'
+          );
+        }
+      ]
+    },
+
+    /* Log mislukte requests */
+    failedRequestHandler: async ({ request, error }) => {
+      await errorStore.pushData({ url: request.url, error: error.message });
+      log.error(`❌ ${request.url} — ${error.message}`);
+    }
   });
 
   await crawler.run([startUrl]);
 }
 
-/* ---------- HANDLER ---------- */
-async function handler(
-  { page, request, requestQueue, log },
+/* ============================================================= */
+/* ================  MAIN PAGE-HANDLER ========================= */
+/* ============================================================= */
+async function mainHandler(
+  { page, request, requestQueue },
   itemsStore,
   errorStore,
   options
 ) {
   try {
-    /********* 1. DOM schoonmaken en tekst ophalen *********/
+    /* 1. DOM opschonen */
     await page.evaluate(() =>
       document.querySelectorAll('script,style,template,noscript')
         .forEach(el => el.remove())
     );
 
+    /* 2. Tekst & HTML ophalen */
     const html = await page.content();
     const text = await page.evaluate(() => {
       const root = document.querySelector('main,article,#content');
       return (root ?? document.body).innerText.trim();
     });
 
-    /********* 2. Alle links + menu-links *********/
+    /* 3. Alle absolute links + menu-links */
     const allLinks = await page.$$eval('a[href]', els =>
       [...new Set(
         els.map(a => a.href.trim())
@@ -52,14 +86,13 @@ async function handler(
     );
     const navLinks = await page.$$eval('nav a[href]', els => els.map(a => a.href.trim()));
 
-    /********* 3. E-mail & telefoon zoeken *********/
-    const emailRx  = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-    const phoneRx  = /(\+?\d[\d\s\-]{7,}\d)/g;
-    const emails   = [...new Set(text.match(emailRx)  || [])];
-    const phones   = [...new Set(text.match(phoneRx) || [])];
-    const contactFound = emails.length || phones.length;
+    /* 4. Contact-regex */
+    const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+    const phoneRx = /(\+?\d[\d\s\-]{7,}\d)/g;
+    const emails  = [...new Set(text.match(emailRx)  || [])];
+    const phones  = [...new Set(text.match(phoneRx) || [])];
 
-    /********* 4. Dataset-item (alleen 1×) *********/
+    /* 5. Resultaat alleen op eerste poging wegschrijven */
     if (request.retryCount === 0) {
       await itemsStore.pushData({
         url: request.url,
@@ -67,22 +100,23 @@ async function handler(
         links: allLinks,
         emails,
         phones,
-        contactFound
+        contactFound: emails.length || phones.length
       });
     }
 
-    /********* 5. Beleefde delay (jitter) *********/
+    /* 6. Beleefde delay (jitter) */
     const baseDelay = options.delayMillis ?? 0;
     if (baseDelay) {
       const jitter = baseDelay * (0.7 + 0.6 * Math.random());
       await new Promise(r => setTimeout(r, jitter));
     }
 
-    /********* 6. Diepte-check *********/
-    const maxDepth = options.maxDepth ?? 3;
-    if ((request.userData.depth ?? 0) >= maxDepth) return;
+    /* 7. Max depth check */
+    const depth     = (request.userData.depth ?? 0);
+    const maxDepth  = options.maxDepth ?? 3;
+    if (depth >= maxDepth) return;
 
-    /********* 7. Prioriteiten bouwen *********/
+    /* 8. Prioriteiten bepalen */
     const keywordPri = allLinks.filter(u =>
       /contact|about|over|impressum|legal|kontakt|contato/i.test(u)
     );
@@ -93,20 +127,19 @@ async function handler(
       !keywordPri.includes(u) && !menuPri.includes(u)
     );
 
-    /********* 8. Requests in de queue stoppen *********/
     const makeReq = (url) => ({
       url,
-      uniqueKey: url,                     // geen duplicaten
-      userData: { depth: (request.userData.depth ?? 0) + 1 }
+      uniqueKey: url,                         // de-duplicatie
+      userData: { depth: depth + 1 }
     });
 
+    /* 9. Queue: keywords → menu → rest */
     await requestQueue.addRequests(keywordPri.map(makeReq), { forefront: true });
     await requestQueue.addRequests(menuPri.map(makeReq),    { forefront: true });
     await requestQueue.addRequests(normal.map(makeReq));
 
   } catch (err) {
     await errorStore.pushData({ url: request.url, error: err.message });
-    log.error(`❌ ${request.url} — ${err.message}`);
-    throw err;                              // laat Crawlee retry doen
+    throw err;                                  // retrigger retry-mechanisme
   }
 }
