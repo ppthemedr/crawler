@@ -1,15 +1,16 @@
-/* QUICK CONTACT-ONLY CRAWLER
+/* CONTACT-ONLY CRAWLER
 --------------------------------------------------- */
 import { PlaywrightCrawler, Dataset } from 'crawlee';
 
-export async function contactCrawler(startUrl, runId) {
+export async function contactCrawler(startUrl, runId, options = {}) {
   const dataset = await Dataset.open(runId);
-
   const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
   const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
 
   const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 5,
+    maxRequestsPerCrawl: options.maxRequestsPerCrawl ?? 5,
+    maxDepth:            options.maxDepth            ?? 3,
+    ignoreRobotsTxt:     true,
     async requestHandler({ page, request, enqueueLinks }) {
       const html   = await page.content();
       const emails = [...new Set(html.match(emailRx)  || [])];
