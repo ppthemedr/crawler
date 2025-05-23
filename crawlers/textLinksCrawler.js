@@ -1,54 +1,44 @@
-/* EENVOUDIGE TEXT- & LINKS-CRAWLER
-   – prioriteit: contact/over/impressum  ➜ eerst
-   – menu-links (<nav>)                 ➜ daarna
-   – optioneel delayMillis (met jitter)
-   – retries & navigationTimeout
----------------------------------------------------------------- */
 import { PlaywrightCrawler, Dataset, log } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
-  /* Result- en error-datasets */
-  const itemsDs  = await Dataset.open(runId);
-  const errorDs  = await Dataset.open(`${runId}-errors`);
+  const itemsDs = await Dataset.open(runId);
+  const errorDs = await Dataset.open(`${runId}-errors`);
 
-  /* Crawler */
   const crawler = new PlaywrightCrawler({
+    /* ––– basis-instellingen ––– */
     maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 8,
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
     maxConcurrency:        2,
 
+    /* mislukte requests loggen */
     failedRequestHandler: async ({ request, error }) => {
       await errorDs.pushData({ url: request.url, error: error.message });
       log.error(`❌ ${request.url} — ${error.message}`);
     },
 
+    /* hoofd-handler */
     requestHandler: async ({ page, request, requestQueue }) => {
-      /***** 1. DOM opschonen *****/
       await page.evaluate(() =>
         document.querySelectorAll('script,style,template,noscript')
               .forEach(el => el.remove())
       );
 
-      /***** 2. Content ophalen *****/
       const text = await page.evaluate(() => {
         const root = document.querySelector('main,article,#content');
         return (root ?? document.body).innerText.trim();
       });
 
-      /***** 3. Links & menu-links *****/
       const links = await page.$$eval('a[href]', els =>
         [...new Set(els.map(a => a.href.trim()).filter(u => u.startsWith('http')))]
       );
       const navLinks = await page.$$eval('nav a[href]', els => els.map(a => a.href.trim()));
 
-      /***** 4. Contact zoeken *****/
       const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
       const phoneRx = /(\+?\d[\d\s\-]{7,}\d)/g;
       const emails  = [...new Set(text.match(emailRx)  || [])];
       const phones  = [...new Set(text.match(phoneRx) || [])];
 
-      /***** 5. Item 1× opslaan *****/
       if (request.retryCount === 0) {
         await itemsDs.pushData({
           url: request.url,
@@ -60,14 +50,12 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
         });
       }
 
-      /***** 6. Delay (beleefd) *****/
-      const base = options.delayMillis ?? 0;
-      if (base) {
-        const ms = base * (0.7 + 0.6 * Math.random());
+      const baseDelay = options.delayMillis ?? 0;
+      if (baseDelay) {
+        const ms = baseDelay * (0.7 + 0.6 * Math.random());
         await new Promise(r => setTimeout(r, ms));
       }
 
-      /***** 7. Depth-check & enqueue *****/
       const depth    = (request.userData.depth ?? 0);
       const maxDepth = options.maxDepth ?? 3;
       if (depth >= maxDepth) return;
