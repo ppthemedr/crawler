@@ -1,6 +1,7 @@
 /* TEXT + LINKS CRAWLER
 --------------------------------------------------- */
 import { PlaywrightCrawler } from 'crawlee';
+import { Dataset } from 'crawlee';
 
 export async function textLinksCrawler(startUrl) {
   const crawler = new PlaywrightCrawler({
