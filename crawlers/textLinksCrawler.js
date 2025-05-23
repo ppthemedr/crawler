@@ -1,21 +1,19 @@
-/* TEXT + LINKS CRAWLER  (flexibele opties, robots.txt wordt genegeerd)
---------------------------------------------------- */
+/* TEXT + LINKS CRAWLER – met prioriteit voor “contact” / “over”
+---------------------------------------------------------------- */
 import { PlaywrightCrawler, Dataset } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
   const dataset = await Dataset.open(runId);
 
-  /* Alleen ondersteunde opties meegeven */
   const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl: options.maxRequestsPerCrawl ?? 5
-    // geen robots-optie nodig: PlaywrightCrawler negeert robots.txt standaard
   });
 
   crawler.router.addDefaultHandler(async ({ page, request, enqueueLinks }) => {
     /* scripts/styles strippen */
     await page.evaluate(() =>
       document.querySelectorAll('script,style,template,noscript')
-            .forEach(el => el.remove())
+        .forEach(el => el.remove())
     );
 
     const text = await page.evaluate(() => {
@@ -30,7 +28,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       )]
     );
 
-    /* contact-regex */
+    /* contact-detectie */
     const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
     const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
     const emails  = [...new Set(text.match(emailRx)  || [])];
@@ -51,11 +49,19 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       candidateLinks
     });
 
-    /* Alleen interne links, met maxDepth-limit */
-    await enqueueLinks({
-      strategy: 'same-domain',
-      maxDepth: options.maxDepth ?? 3
-    });
+    /* -------  PRIORITEIT bij “contact” / “over”  ------- */
+    const priority = links.filter(l => /contact|over/i.test(l));
+    const normal   = links.filter(l => !/contact|over/i.test(l));
+
+    /* eerst prioriteitslinks (voorfront = true) */
+    for (const link of priority) {
+      await enqueueLinks({ urls: [link], forefront: true, strategy: 'same-domain' });
+    }
+
+    /* daarna overige links, normale volgorde */
+    for (const link of normal) {
+      await enqueueLinks({ urls: [link], strategy: 'same-domain' });
+    }
   });
 
   await crawler.run([startUrl]);
