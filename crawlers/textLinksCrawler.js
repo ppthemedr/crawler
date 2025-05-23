@@ -1,18 +1,19 @@
-/* SCRAPE VISIBLE TEXT + LINKS  (returns contact flags)
+/* TEXT + LINKS CRAWLER  (flexibele options)
 --------------------------------------------------- */
 import { PlaywrightCrawler, Dataset } from 'crawlee';
 
-export async function textLinksCrawler(startUrl, runId) {
+export async function textLinksCrawler(startUrl, runId, options = {}) {
   const dataset = await Dataset.open(runId);
 
   const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: 5,
+    maxRequestsPerCrawl: options.maxRequestsPerCrawl ?? 5,
+    maxDepth:            options.maxDepth            ?? 3,
+    ignoreRobotsTxt:     true,                         // always ignore
     async requestHandler({ page, request, enqueueLinks }) {
-      // Remove script/style elements (cleaner text)              // My comment
-      await page.evaluate(() => {
+      await page.evaluate(() =>
         document.querySelectorAll('script,style,template,noscript')
-          .forEach(el => el.remove());
-      });
+          .forEach(el => el.remove())
+      );
 
       const text = await page.evaluate(() => {
         const root = document.querySelector('main,article,#content');
@@ -26,15 +27,12 @@ export async function textLinksCrawler(startUrl, runId) {
         )]
       );
 
-      // Basic contact detection                                 // My comment
       const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
       const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
       const emails  = [...new Set(text.match(emailRx)  || [])];
       const phones  = [...new Set(text.match(phoneRx) || [])];
-
       const contactFound = emails.length || phones.length;
 
-      // Heuristic best next links
       const candidateLinks = links
         .filter(l => /contact|about|over|impressum|legal|team/i.test(l))
         .slice(0, 5);
@@ -49,6 +47,7 @@ export async function textLinksCrawler(startUrl, runId) {
         candidateLinks
       });
 
+      // uitsluitend interne links crawlen
       await enqueueLinks({ strategy: 'same-domain' });
     }
   });
