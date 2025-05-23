@@ -11,3 +11,19 @@
 - `sitemap` → leest `/sitemap.xml` (géén Playwright nodig)
 
 Deploy-tip: mount **/apify_storage** naar een persistent volume.
+
+### Beveiliging
+- **API_TOKEN** in Coolify → verplicht:
+  1. `X-API-Token: <token>`  **of**
+  2. Basic Auth (`user:any`, `pass:<token>`)
+
+### /run payload
+```json
+{
+  "crawler_type": "text",
+  "startUrl": "https://example.com",
+  "options": {
+    "maxRequestsPerCrawl": 8,
+    "maxDepth": 4
+  }
+}
