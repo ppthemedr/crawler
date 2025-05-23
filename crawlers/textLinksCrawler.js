@@ -1,34 +1,34 @@
 /* TEXT + LINKS CRAWLER
-   – prioriteert “contact / over / impressum …” (keywords)
-   – menu-links krijgen tweede prioriteit
+   – prioriteert “contact / over / impressum …”
+   – menu-links krijgen 2e prioriteit
    – optionele delayMillis met jitter
-   – retry & timeout, zonder dubbele items
+   – maxRequestRetries & navigationTimeoutSecs
 --------------------------------------------------------------- */
 import { PlaywrightCrawler, Dataset, log } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
-  /* 1. open datasets */
-  const dataset     = await Dataset.open(runId);
-  const errorStore  = await Dataset.open(`${runId}-errors`);
+  /* 1. datasets */
+  const dataset    = await Dataset.open(runId);
+  const errorStore = await Dataset.open(`${runId}-errors`);
 
-  /* 2. beleefde crawler-config + retry & timeout */
+  /* 2. crawler-config */
   const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 5,
-    minConcurrency:        1,
-    maxConcurrency:        2,
-    navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
-    retryAttempts:         options.retryAttempts         ?? 3
+    maxRequestsPerCrawl:    options.maxRequestsPerCrawl   ?? 5,
+    minConcurrency:         1,
+    maxConcurrency:         2,
+    navigationTimeoutSecs:  options.navigationTimeoutSecs ?? 30,
+    maxRequestRetries:      options.maxRequestRetries     ?? 3
   });
 
   /* 3. mislukte requests loggen */
   crawler.router.setFailedRequestHandler(async ({ request, error }) => {
     await errorStore.pushData({ url: request.url, error: error.message });
-    log.error(`❌  ${request.url} — ${error.message}`);
+    log.error(`❌ ${request.url} — ${error.message}`);
   });
 
   /* 4. hoofd-handler  */
   crawler.router.addDefaultHandler(async ({ page, request, enqueueLinks }) => {
-    /* DOM opschonen */
+    /* scripts etc verwijderen */
     await page.evaluate(() =>
       document.querySelectorAll('script,style,template,noscript')
         .forEach(el => el.remove())
@@ -40,18 +40,18 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       return (root ?? document.body).innerText.trim();
     });
 
-    /* links ophalen */
-    const links = await page.$$eval('a[href]', as =>
+    /* alle links */
+    const links = await page.$$eval('a[href]', els =>
       [...new Set(
-        as.map(a => a.getAttribute('href'))
-          .filter(h => h && !h.startsWith('javascript:') && !h.startsWith('#'))
+        els.map(a => a.getAttribute('href'))
+           .filter(h => h && !h.startsWith('javascript:') && !h.startsWith('#'))
       )]
     );
 
-    /* menu-links apart vangen */
+    /* menu-links */
     const navLinks = await page.$$eval('nav a[href]', els => els.map(a => a.href));
 
-    /* contact-regex */
+    /* contact-regexen */
     const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
     const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
     const emails  = [...new Set(text.match(emailRx)  || [])];
@@ -62,7 +62,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       /contact|about|over|impressum|legal|kontakt|contato/i.test(l)
     ).slice(0, 5);
 
-    /* schrijf item slechts één keer (eerste poging) */
+    /* enkel op eerste poging schrijven */
     if (request.retryCount === 0) {
       await dataset.pushData({
         url: request.url,
@@ -82,25 +82,24 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       await new Promise(r => setTimeout(r, jitter));
     }
 
-    /* ---- prioriteits-queue opbouwen ---- */
+    /* prioriteitsqueues */
     const keywordPri = links.filter(l =>
       /contact|about|over|impressum|legal|kontakt|contato/i.test(l)
     );
-    const menuPri    = links.filter(l =>
+    const menuPri = links.filter(l =>
       navLinks.includes(l) && !keywordPri.includes(l)
     );
-    const normal     = links.filter(l =>
+    const normal = links.filter(l =>
       !keywordPri.includes(l) && !menuPri.includes(l)
     );
 
     const maxDepth = options.maxDepth ?? 3;
 
-    /* enqueue: eerst keywords, dan menu, dan de rest */
     for (const link of keywordPri) await enqueueLinks({ urls:[link], forefront:true,  strategy:'same-domain', maxDepth });
     for (const link of menuPri)    await enqueueLinks({ urls:[link], forefront:true,  strategy:'same-domain', maxDepth });
     for (const link of normal)     await enqueueLinks({ urls:[link], forefront:false, strategy:'same-domain', maxDepth });
   });
 
-  /* 5. start run */
+  /* 5. start */
   await crawler.run([startUrl]);
 }
