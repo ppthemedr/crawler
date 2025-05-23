@@ -1,6 +1,7 @@
 /* SITEMAP CRAWLER
 --------------------------------------------------- */
 import { XMLParser } from 'fast-xml-parser';   // fast-xml-parser blijft nodig
+import { Dataset } from 'crawlee';
 
 export async function sitemapCrawler(startUrl) {
   const url = new URL('/sitemap.xml', startUrl).href;
