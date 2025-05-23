@@ -1,116 +1,112 @@
-/* TEXT + LINKS CRAWLER
-   – prioriteert "contact / over …"  ➜ eerste
-   – menu-links ➜ tweede
-   – optionele delayMillis  (+ jitter)
-   – maxRequestRetries  &  navigationTimeoutSecs
+/* TEXT + LINKS CRAWLER – stabiel & beleefd
 ---------------------------------------------------------------- */
 import {
   PlaywrightCrawler,
   Dataset,
-  createPlaywrightRouter,
   log
 } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
-  /* 1. datasets */
-  const dataset    = await Dataset.open(runId);
-  const errorStore = await Dataset.open(`${runId}-errors`);
+  /* datasets */
+  const itemsStore  = await Dataset.open(runId);
+  const errorStore  = await Dataset.open(`${runId}-errors`);
 
-  /* 2. Router aanmaken */
-  const router = createPlaywrightRouter();
+  /* crawler */
+  const crawler = new PlaywrightCrawler({
+    requestHandler: async (ctx) => handler(ctx, itemsStore, errorStore, options),
+    maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 5,
+    navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
+    maxConcurrency:        2,
+    maxRequestRetries:     options.maxRequestRetries     ?? 3
+  });
 
-  router.addDefaultHandler(async ({ page, request, enqueueLinks }) => {
-    /* 2.1 DOM opruimen */
+  await crawler.run([startUrl]);
+}
+
+/* ---------- HANDLER ---------- */
+async function handler(
+  { page, request, requestQueue, log },
+  itemsStore,
+  errorStore,
+  options
+) {
+  try {
+    /********* 1. DOM schoonmaken en tekst ophalen *********/
     await page.evaluate(() =>
       document.querySelectorAll('script,style,template,noscript')
         .forEach(el => el.remove())
     );
 
-    /* 2.2 Tekst & HTML */
     const html = await page.content();
     const text = await page.evaluate(() => {
       const root = document.querySelector('main,article,#content');
       return (root ?? document.body).innerText.trim();
     });
 
-    /* 2.3 Alle links + menu-links */
-    const links = await page.$$eval('a[href]', els =>
+    /********* 2. Alle links + menu-links *********/
+    const allLinks = await page.$$eval('a[href]', els =>
       [...new Set(
-        els.map(a => a.getAttribute('href'))
-           .filter(h => h && !h.startsWith('javascript:') && !h.startsWith('#'))
+        els.map(a => a.href.trim())
+           .filter(u => u.startsWith('http'))
       )]
     );
-    const navLinks = await page.$$eval('nav a[href]', els => els.map(a => a.href));
+    const navLinks = await page.$$eval('nav a[href]', els => els.map(a => a.href.trim()));
 
-    /* 2.4 Contact-regex */
-    const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-    const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
-    const emails  = [...new Set(text.match(emailRx)  || [])];
-    const phones  = [...new Set(text.match(phoneRx) || [])];
+    /********* 3. E-mail & telefoon zoeken *********/
+    const emailRx  = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+    const phoneRx  = /(\+?\d[\d\s\-]{7,}\d)/g;
+    const emails   = [...new Set(text.match(emailRx)  || [])];
+    const phones   = [...new Set(text.match(phoneRx) || [])];
+    const contactFound = emails.length || phones.length;
 
-    const contactFound   = emails.length || phones.length;
-    const candidateLinks = links.filter(l =>
-      /contact|about|over|impressum|legal|kontakt|contato/i.test(l)
-    ).slice(0, 5);
-
-    /* 2.5 Item wegschrijven – alleen op eerste poging */
+    /********* 4. Dataset-item (alleen 1×) *********/
     if (request.retryCount === 0) {
-      await dataset.pushData({
+      await itemsStore.pushData({
         url: request.url,
         text,
-        links,
+        links: allLinks,
         emails,
         phones,
-        contactFound,
-        candidateLinks
+        contactFound
       });
     }
 
-    /* 2.6 Delay met jitter (beleefdheid) */
+    /********* 5. Beleefde delay (jitter) *********/
     const baseDelay = options.delayMillis ?? 0;
     if (baseDelay) {
       const jitter = baseDelay * (0.7 + 0.6 * Math.random());
       await new Promise(r => setTimeout(r, jitter));
     }
 
-    /* 2.7 Priolijsten */
-    const keywordPri = links.filter(l =>
-      /contact|about|over|impressum|legal|kontakt|contato/i.test(l)
-    );
-    const menuPri = links.filter(l =>
-      navLinks.includes(l) && !keywordPri.includes(l)
-    );
-    const normal = links.filter(l =>
-      !keywordPri.includes(l) && !menuPri.includes(l)
-    );
-
+    /********* 6. Diepte-check *********/
     const maxDepth = options.maxDepth ?? 3;
+    if ((request.userData.depth ?? 0) >= maxDepth) return;
 
-    /* enqueue – volgorde: keywords → menu → rest */
-    for (const link of keywordPri)
-      await enqueueLinks({ urls:[link], forefront:true,  maxDepth, strategy:'same-domain' });
+    /********* 7. Prioriteiten bouwen *********/
+    const keywordPri = allLinks.filter(u =>
+      /contact|about|over|impressum|legal|kontakt|contato/i.test(u)
+    );
+    const menuPri = allLinks.filter(u =>
+      navLinks.includes(u) && !keywordPri.includes(u)
+    );
+    const normal = allLinks.filter(u =>
+      !keywordPri.includes(u) && !menuPri.includes(u)
+    );
 
-    for (const link of menuPri)
-      await enqueueLinks({ urls:[link], forefront:true,  maxDepth, strategy:'same-domain' });
+    /********* 8. Requests in de queue stoppen *********/
+    const makeReq = (url) => ({
+      url,
+      uniqueKey: url,                     // geen duplicaten
+      userData: { depth: (request.userData.depth ?? 0) + 1 }
+    });
 
-    for (const link of normal)
-      await enqueueLinks({ urls:[link], forefront:false, maxDepth, strategy:'same-domain' });
-  });
+    await requestQueue.addRequests(keywordPri.map(makeReq), { forefront: true });
+    await requestQueue.addRequests(menuPri.map(makeReq),    { forefront: true });
+    await requestQueue.addRequests(normal.map(makeReq));
 
-  /* 3. Crawler-instantie */
-  const crawler = new PlaywrightCrawler({
-    requestHandler:         router,
-    maxRequestsPerCrawl:    options.maxRequestsPerCrawl   ?? 5,
-    minConcurrency:         1,
-    maxConcurrency:         2,
-    navigationTimeoutSecs:  options.navigationTimeoutSecs ?? 30,
-    maxRequestRetries:      options.maxRequestRetries     ?? 3,
-    failedRequestHandler: async ({ request, error }) => {
-      await errorStore.pushData({ url: request.url, error: error.message });
-      log.error(`❌ ${request.url} — ${error.message}`);
-    }
-  });
-
-  /* 4. Start */
-  await crawler.run([startUrl]);
+  } catch (err) {
+    await errorStore.pushData({ url: request.url, error: err.message });
+    log.error(`❌ ${request.url} — ${err.message}`);
+    throw err;                              // laat Crawlee retry doen
+  }
 }
