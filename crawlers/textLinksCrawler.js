@@ -1,23 +1,34 @@
 /* TEXT + LINKS CRAWLER
-   – prioriteert “contact / over / impressum …”
-   – bevat optionele delayMillis voor beleefde crawling
+   – prioriteert “contact / over / impressum …” (keywords)
+   – menu-links krijgen tweede prioriteit
+   – optionele delayMillis met jitter
+   – retry & timeout, zonder dubbele items
 --------------------------------------------------------------- */
-import { PlaywrightCrawler, Dataset } from 'crawlee';
+import { PlaywrightCrawler, Dataset, log } from 'crawlee';
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
-  /* open aparte dataset-map voor deze run */
-  const dataset = await Dataset.open(runId);
+  /* 1. open datasets */
+  const dataset     = await Dataset.open(runId);
+  const errorStore  = await Dataset.open(`${runId}-errors`);
 
-  /* crawler-instantie (robots.txt wordt standaard genegeerd) */
+  /* 2. beleefde crawler-config + retry & timeout */
   const crawler = new PlaywrightCrawler({
-    maxRequestsPerCrawl: options.maxRequestsPerCrawl ?? 5,
-    minConcurrency: 1,
-    maxConcurrency: 2
+    maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 5,
+    minConcurrency:        1,
+    maxConcurrency:        2,
+    navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
+    retryAttempts:         options.retryAttempts         ?? 3
   });
 
-  /* één universele handler */
+  /* 3. mislukte requests loggen */
+  crawler.router.setFailedRequestHandler(async ({ request, error }) => {
+    await errorStore.pushData({ url: request.url, error: error.message });
+    log.error(`❌  ${request.url} — ${error.message}`);
+  });
+
+  /* 4. hoofd-handler  */
   crawler.router.addDefaultHandler(async ({ page, request, enqueueLinks }) => {
-    /* ------- 1. DOM opruimen & tekst pakken -------- */
+    /* DOM opschonen */
     await page.evaluate(() =>
       document.querySelectorAll('script,style,template,noscript')
         .forEach(el => el.remove())
@@ -29,7 +40,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       return (root ?? document.body).innerText.trim();
     });
 
-    /* ------- 2. alle unieke links verzamelen -------- */
+    /* links ophalen */
     const links = await page.$$eval('a[href]', as =>
       [...new Set(
         as.map(a => a.getAttribute('href'))
@@ -37,7 +48,10 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       )]
     );
 
-    /* ------- 3. eenvoudige contact-regex  -------- */
+    /* menu-links apart vangen */
+    const navLinks = await page.$$eval('nav a[href]', els => els.map(a => a.href));
+
+    /* contact-regex */
     const emailRx = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
     const phoneRx = /(\+?\d[\d\-\s]{7,}\d)/g;
     const emails  = [...new Set(text.match(emailRx)  || [])];
@@ -48,47 +62,45 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       /contact|about|over|impressum|legal|kontakt|contato/i.test(l)
     ).slice(0, 5);
 
-    /* ------- 4. data wegschrijven -------- */
-    await dataset.pushData({
-      url: request.url,
-      text,
-      links,
-      emails,
-      phones,
-      contactFound,
-      candidateLinks
-    });
+    /* schrijf item slechts één keer (eerste poging) */
+    if (request.retryCount === 0) {
+      await dataset.pushData({
+        url: request.url,
+        text,
+        links,
+        emails,
+        phones,
+        contactFound,
+        candidateLinks
+      });
+    }
 
-    /* ------- 5. beleefde delay (optioneel) -------- */
-    const delay = options.delayMillis ?? 0;
-    if (delay) await new Promise(r => setTimeout(r, delay));
+    /* optionele jitter-delay */
+    const baseDelay = options.delayMillis ?? 0;
+    if (baseDelay) {
+      const jitter = baseDelay * (0.7 + 0.6 * Math.random());
+      await new Promise(r => setTimeout(r, jitter));
+    }
 
-    /* ------- 6. links enqueuen met prioriteit -------- */
-    const priority = links.filter(l =>
-      /contact|over|impressum|legal|kontakt|contato/i.test(l)
+    /* ---- prioriteits-queue opbouwen ---- */
+    const keywordPri = links.filter(l =>
+      /contact|about|over|impressum|legal|kontakt|contato/i.test(l)
     );
-    const normal   = links.filter(l => !priority.includes(l));
+    const menuPri    = links.filter(l =>
+      navLinks.includes(l) && !keywordPri.includes(l)
+    );
+    const normal     = links.filter(l =>
+      !keywordPri.includes(l) && !menuPri.includes(l)
+    );
 
-    /* eerst belangrijke links – forefront: true */
-    for (const link of priority) {
-      await enqueueLinks({
-        urls: [link],
-        forefront: true,
-        strategy:  'same-domain',
-        maxDepth:  options.maxDepth ?? 3
-      });
-    }
+    const maxDepth = options.maxDepth ?? 3;
 
-    /* daarna de rest */
-    for (const link of normal) {
-      await enqueueLinks({
-        urls: [link],
-        strategy: 'same-domain',
-        maxDepth: options.maxDepth ?? 3
-      });
-    }
+    /* enqueue: eerst keywords, dan menu, dan de rest */
+    for (const link of keywordPri) await enqueueLinks({ urls:[link], forefront:true,  strategy:'same-domain', maxDepth });
+    for (const link of menuPri)    await enqueueLinks({ urls:[link], forefront:true,  strategy:'same-domain', maxDepth });
+    for (const link of normal)     await enqueueLinks({ urls:[link], forefront:false, strategy:'same-domain', maxDepth });
   });
 
-  /* ------- 7. run starten -------- */
+  /* 5. start run */
   await crawler.run([startUrl]);
 }
