@@ -1,21 +1,21 @@
 /* TEXT + LINKS CRAWLER  (flexible options + advanced extraction)
 --------------------------------------------------------------- */
-import { PlaywrightCrawler, Dataset, RequestQueue } from 'crawlee'; // <--- ADD RequestQueue here
+import { PlaywrightCrawler, Dataset } from 'crawlee'; // <--- RequestQueue is NOT needed here for maxDepth
 
 export async function textLinksCrawler(startUrl, runId, options = {}) {
   // My comment: open separate datasets for items & errors
   const itemsDs = await Dataset.open(runId);
   const errorDs = await Dataset.open(`${runId}-errors`);
 
-  // My comment: Create a RequestQueue and pass maxDepth to it
-  const requestQueue = await RequestQueue.open({
-    maxDepth: options.maxDepth ?? 3,
-  });
+  // My comment: REMOVE the RequestQueue instantiation that caused the error
+  // const requestQueue = await RequestQueue.open({
+  //   maxDepth: options.maxDepth ?? 3,
+  // });
 
   const crawler = new PlaywrightCrawler({
-    requestQueue, // <--- Pass the configured RequestQueue here
+    // requestQueue, // <--- REMOVE THIS LINE
     maxRequestsPerCrawl:   options.maxRequestsPerCrawl   ?? 5,
-    // maxDepth:              options.maxDepth            ?? 3, // <--- REMOVE THIS LINE
+    maxDepth:              options.maxDepth            ?? 3, // <--- Keep maxDepth here, it's a valid PlaywrightCrawler option
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
     ignoreRobotsTxt:       true,
@@ -95,7 +95,7 @@ export async function textLinksCrawler(startUrl, runId, options = {}) {
       if (delay) await new Promise(r => setTimeout(r, delay));
 
       // My comment: enqueue same-domain links only
-      // The RequestQueue will now handle the maxDepth limit automatically
+      // The PlaywrightCrawler's maxDepth option will handle the depth limit
       await enqueueLinks({ strategy: 'same-domain' });
     }
   });
