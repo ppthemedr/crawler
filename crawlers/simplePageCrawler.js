@@ -7,7 +7,6 @@ export async function simplePageCrawler(startUrl, runId, options = {}) {
   const crawler = new PlaywrightCrawler({
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
-    ignoreRobotsTxt:       true,
 
     // Geen failedRequestHandler voor eenvoud, fouten worden gelogd door Crawlee zelf
     // en de run zal falen als de startUrl niet bereikbaar is.
