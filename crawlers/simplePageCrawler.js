@@ -7,8 +7,9 @@ export async function simplePageCrawler(startUrl, runId, options = {}) {
   const crawler = new PlaywrightCrawler({
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
+    // 'ignoreRobotsTxt' is hier volledig verwijderd, omdat het problemen veroorzaakt.
+    // Standaard respecteert Crawlee robots.txt.
 
-    // DEZE requestHandler MOET BINNEN DIT OBJECT STAAN!
     requestHandler: async ({ page, request }) => {
       // My comment: clean out scripts/styles to get cleaner text
       await page.evaluate(() =>
@@ -33,14 +34,15 @@ export async function simplePageCrawler(startUrl, runId, options = {}) {
       // Sla alleen de URL, tekstinhoud en links op
       await itemsDs.pushData({
         url: request.url,
-        textContent, // Nu wordt alleen de tekstinhoud opgeslagen
+        textContent,
         links
       });
 
       // Geen enqueueLinks, want we crawlen maar één pagina
-    } // <--- SLUITING VAN requestHandler
-  }); // <--- SLUITING VAN PlaywrightCrawler CONFIGURATIE-OBJECT
+    }
+  });
 
   // Start de crawler met alleen de opgegeven URL
-  await crawler.run([{ url: startUrl }], { ignoreRobotsTxt: true });
+  // De optie 'ignoreRobotsTxt' is ook hier verwijderd.
+  await crawler.run([{ url: startUrl }]);
 }
