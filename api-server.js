@@ -3,8 +3,8 @@
 import express from 'express';
 import fs      from 'fs/promises';
 import { Dataset } from 'crawlee';
-// Importeer de nieuwe, simpele crawler
-import { simplePageCrawler } from './simplePageCrawler.js'; // AANGEPAST
+// Importeer de nieuwe, simpele crawler met het correcte pad
+import { simplePageCrawler } from './crawlers/simplePageCrawler.js'; // <--- DEZE LIJN IS AANGEPAST
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -31,15 +31,15 @@ app.use('/datasets', express.static('/apify_storage/datasets'));
 app.post('/run', async (req, res) => {
   const { crawler_type, startUrl, options = {} } = req.body;
   // Controleer op het nieuwe type "simple"
-  if (crawler_type !== 'simple' || !startUrl) { // AANGEPAST
+  if (crawler_type !== 'simple' || !startUrl) {
     return res.status(400).json({
-      error: 'crawler_type must be "simple" and startUrl required' // AANGEPAST
+      error: 'crawler_type must be "simple" and startUrl required'
     });
   }
   const runId = `run-${Date.now()}`;
   try {
     // Roep de nieuwe, simpele crawler aan
-    await simplePageCrawler(startUrl, runId, options); // AANGEPAST
+    await simplePageCrawler(startUrl, runId, options);
     const ds     = await Dataset.open(runId);
     const { items } = await ds.getData();
     const pages = items.map(i => i.url);
