@@ -3,7 +3,8 @@
 import express from 'express';
 import fs      from 'fs/promises';
 import { Dataset } from 'crawlee';
-import { textLinksCrawler } from './crawlers/textLinksCrawler.js';
+// Importeer de nieuwe, simpele crawler
+import { simplePageCrawler } from './simplePageCrawler.js'; // AANGEPAST
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -29,14 +30,16 @@ app.use('/datasets', express.static('/apify_storage/datasets'));
 // My comment: start new crawl
 app.post('/run', async (req, res) => {
   const { crawler_type, startUrl, options = {} } = req.body;
-  if (crawler_type !== 'text' || !startUrl) {
+  // Controleer op het nieuwe type "simple"
+  if (crawler_type !== 'simple' || !startUrl) { // AANGEPAST
     return res.status(400).json({
-      error: 'crawler_type must be "text" and startUrl required'
+      error: 'crawler_type must be "simple" and startUrl required' // AANGEPAST
     });
   }
   const runId = `run-${Date.now()}`;
   try {
-    await textLinksCrawler(startUrl, runId, options);
+    // Roep de nieuwe, simpele crawler aan
+    await simplePageCrawler(startUrl, runId, options); // AANGEPAST
     const ds     = await Dataset.open(runId);
     const { items } = await ds.getData();
     const pages = items.map(i => i.url);
