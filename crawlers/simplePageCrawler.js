@@ -8,12 +8,19 @@ export async function simplePageCrawler(startUrl, runId, options = {}) {
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
 
-    // Geen failedRequestHandler voor eenvoud, fouten worden gelogd door Crawlee zelf
-    // en de run zal falen als de startUrl niet bereikbaar is.
-
+    // DEZE requestHandler MOET BINNEN DIT OBJECT STAAN!
     requestHandler: async ({ page, request }) => {
-      // Haal de volledige HTML-inhoud van de pagina op
-      const htmlContent = await page.content();
+      // My comment: clean out scripts/styles to get cleaner text
+      await page.evaluate(() =>
+        document.querySelectorAll('script,style,template,noscript')
+               .forEach(el => el.remove())
+      );
+
+      // My comment: extract visible text from the main content area or body
+      const textContent = await page.evaluate(() => {
+        const root = document.querySelector('main,article,#content');
+        return (root ?? document.body).innerText.trim();
+      });
 
       // Haal alle absolute links op de pagina op
       const links = await page.$$eval('a[href]', els =>
@@ -23,17 +30,17 @@ export async function simplePageCrawler(startUrl, runId, options = {}) {
         )]
       );
 
-      // Sla alleen de URL, HTML-inhoud en links op
+      // Sla alleen de URL, tekstinhoud en links op
       await itemsDs.pushData({
         url: request.url,
-        htmlContent,
+        textContent, // Nu wordt alleen de tekstinhoud opgeslagen
         links
       });
 
       // Geen enqueueLinks, want we crawlen maar één pagina
-    }
-  });
+    } // <--- SLUITING VAN requestHandler
+  }); // <--- SLUITING VAN PlaywrightCrawler CONFIGURATIE-OBJECT
 
   // Start de crawler met alleen de opgegeven URL
-  await crawler.run([{ url: startUrl }]);
+  await crawler.run([{ url: startUrl }], { ignoreRobotsTxt: true });
 }
