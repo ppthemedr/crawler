@@ -1,5 +1,3 @@
-/* api-server.js — express + Crawlee + page-overzicht bovenaan
----------------------------------------------------------------- */
 import express from 'express';
 import fs      from 'fs/promises';
 import { Dataset } from 'crawlee';
@@ -25,7 +23,7 @@ app.use((req, res, next) => {
 });
 
 // My comment: expose static datasets
-app.use('/datasets', express.static('/apify_storage/datasets'));
+app.use('/datasets', express.static('/app/storage/datasets'));
 
 // My comment: start new crawl
 app.post('/run', async (req, res) => {
@@ -52,7 +50,7 @@ app.post('/run', async (req, res) => {
 
 // My comment: list all runs
 app.get('/datasets', async (_req, res) => {
-  const base = '/apify_storage/datasets';
+  const base = '/app/storage/datasets';
   try {
     const entries = await fs.readdir(base, { withFileTypes: true });
     const runs = entries
@@ -76,7 +74,7 @@ app.delete('/datasets/:id', async (req, res) => {
 
 // My comment: delete all runs
 app.delete('/datasets', async (_req, res) => {
-  const base = '/apify_storage/datasets';
+  const base = '/app/storage/datasets';
   try {
     const entries = await fs.readdir(base);
     const runDirs = entries.filter(d => d.startsWith('run-'));
