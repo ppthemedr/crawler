@@ -31,11 +31,12 @@ const storageDir = '/app/storage';
 
 /* SERVE DATASETS AS STATIC FILES
 --------------------------------------------------- */
-app.use('/datasets', express.static(path.join(storageDir, 'datasets')));
+app.use('/datasets/files', express.static(path.join(storageDir, 'datasets')));
 
 /* SIMPLE IN-MEMORY STATUS TRACKER
 --------------------------------------------------- */
-const runs = {}; // { runId: { status: 'running'|'done'|'error', error?:string } }
+const runs = {}; 
+// { runId: { status: 'running'|'done'|'error', error?:string } }
 
 /* START NEW CRAWL (ASYNC)
 --------------------------------------------------- */
@@ -55,9 +56,9 @@ app.post('/run', async (req, res) => {
   res.json({ status: 'running', datasetId: runId });
 
   // run in background
-  simplePageCrawler(startUrl, runId, options)
+  simplePageCrawler(startUrl, runId, { storageDir, ...options })
     .then(async () => {
-      const ds = await Dataset.open(runId);
+      const ds = await Dataset.open(runId, { storageDir });
       const { items } = await ds.getData();
       runs[runId] = { status: 'done' };
       console.log(`[${runId}] completed with ${items.length} items`);
@@ -68,16 +69,10 @@ app.post('/run', async (req, res) => {
     });
 });
 
-/* GET ONE DATASET
+/* GET ONE DATASET (WITH ITEMS)
 --------------------------------------------------- */
 app.get('/datasets/:id', async (req, res) => {
-  const base = path.join(storageDir, 'datasets');
-  const dirPath = path.join(base, req.params.id);
-
   try {
-    // check of directory bestaat
-    await fs.access(dirPath);
-
     const ds = await Dataset.open(req.params.id, { storageDir });
     const { items } = await ds.getData();
 
@@ -88,10 +83,13 @@ app.get('/datasets/:id', async (req, res) => {
       items
     });
   } catch (e) {
-    res.status(404).json({ error: 'Dataset not found', id: req.params.id });
+    res.status(404).json({
+      error: 'not_found',
+      details: `Dataset ${req.params.id} could not be opened`,
+      hint: 'Check if the run has completed and storageDir is correct'
+    });
   }
 });
-
 
 /* GET STATUS OF ONE RUN
 --------------------------------------------------- */
