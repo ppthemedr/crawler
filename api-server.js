@@ -1,5 +1,6 @@
 import express from 'express';
 import fs      from 'fs/promises';
+import path    from 'path';
 import { Dataset } from 'crawlee';
 // Importeer de nieuwe, simpele crawler met het correcte pad
 import { simplePageCrawler } from './crawlers/simplePageCrawler.js'; // <--- DEZE LIJN IS AANGEPAST
@@ -62,24 +63,27 @@ app.get('/datasets', async (_req, res) => {
   }
 });
 
-// My comment: delete one run
+// DELETE ONE RUN
 app.delete('/datasets/:id', async (req, res) => {
+  const base = '/app/storage/datasets';
+  const dirPath = path.join(base, req.params.id);
+
   try {
-    await Dataset.delete(req.params.id);
+    await fs.rm(dirPath, { recursive: true, force: true });
     res.json({ status: 'deleted', id: req.params.id });
   } catch (e) {
-    res.status(404).json({ error: e.message });
+    res.status(500).json({ error: e.message });
   }
 });
 
-// My comment: delete all runs
+// DELETE ALL RUNS
 app.delete('/datasets', async (_req, res) => {
   const base = '/app/storage/datasets';
   try {
     const entries = await fs.readdir(base);
     const runDirs = entries.filter(d => d.startsWith('run-'));
     for (const id of runDirs) {
-      await Dataset.delete(id);
+      await fs.rm(path.join(base, id), { recursive: true, force: true });
     }
     res.json({ status: 'deleted-all', count: runDirs.length });
   } catch (e) {
