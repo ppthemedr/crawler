@@ -28,13 +28,25 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         return document.body.innerText.trim();
       });
 
-      // Collect all unique absolute links
-      const links = await page.$$eval('a[href]', els =>
-        [...new Set(
-          els.map(a => a.href.trim())
-             .filter(h => h.startsWith('http'))
-        )]
-      );
+      // Collect all unique absolute links, cleaned
+      const links = await page.$$eval('a[href]', els => {
+        return [...new Set(
+          els
+            .map(a => a.href.trim())
+            .filter(h => h.startsWith('http'))
+            .map(h => {
+              try {
+                const u = new URL(h);
+                // Strip querystring en hash
+                u.search = '';
+                u.hash = '';
+                return u.toString();
+              } catch {
+                return h;
+              }
+            })
+        )];
+      });
 
       // Save URL, text and links to dataset
       await itemsDs.pushData({
