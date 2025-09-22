@@ -6,16 +6,15 @@ import { PlaywrightCrawler, Dataset, Configuration } from 'crawlee';
 /* CRAWLER FUNCTION
 --------------------------------------------------- */
 export async function simplePageCrawler(startUrl, runId, options = {}, storageDir = '/app/storage') {
-  // Ensure Crawlee uses the same storage directory as the API
   const config = new Configuration({ storageDir });
 
-  // Open the dataset in the correct storageDir
+  // Open dataset in the correct storageDir
   const itemsDs = await Dataset.open(runId, { config });
 
   const crawler = new PlaywrightCrawler({
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
-    config, // pass config to crawler
+    config,
 
     requestHandler: async ({ page, request }) => {
       // Clean out scripts/styles to get cleaner text
