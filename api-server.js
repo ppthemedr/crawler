@@ -1,12 +1,18 @@
+/* IMPORTS
+--------------------------------------------------- */
 import express from 'express';
 import fs      from 'fs/promises';
 import path    from 'path';
 import { Dataset } from 'crawlee';
 import { simplePageCrawler } from './crawlers/simplePageCrawler.js';
 
+/* INIT APP
+--------------------------------------------------- */
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
+/* AUTHENTICATION (X-API-Token or Basic Auth)
+--------------------------------------------------- */
 const API_TOKEN = process.env.API_TOKEN ?? '';
 app.use((req, res, next) => {
   if (!API_TOKEN) return next();
@@ -21,8 +27,16 @@ app.use((req, res, next) => {
   return res.status(401).json({ error: 'unauthorized' });
 });
 
-app.use('/datasets', express.static(process.env.CRAWLEE_STORAGE_DIR + '/datasets'));
+/* STORAGE DIR CONFIGURATION
+--------------------------------------------------- */
+const storageDir = '/app/storage';
 
+/* SERVE DATASETS AS STATIC FILES
+--------------------------------------------------- */
+app.use('/datasets', express.static(path.join(storageDir, 'datasets')));
+
+/* START NEW CRAWL
+--------------------------------------------------- */
 app.post('/run', async (req, res) => {
   const { crawler_type, startUrl, options = {} } = req.body;
   if (crawler_type !== 'simple' || !startUrl) {
@@ -43,8 +57,10 @@ app.post('/run', async (req, res) => {
   }
 });
 
+/* LIST ALL RUNS
+--------------------------------------------------- */
 app.get('/datasets', async (_req, res) => {
-  const base = process.env.CRAWLEE_STORAGE_DIR + '/datasets';
+  const base = path.join(storageDir, 'datasets');
   try {
     const entries = await fs.readdir(base, { withFileTypes: true });
     const runs = entries
@@ -56,8 +72,10 @@ app.get('/datasets', async (_req, res) => {
   }
 });
 
+/* DELETE ONE RUN
+--------------------------------------------------- */
 app.delete('/datasets/:id', async (req, res) => {
-  const base = process.env.CRAWLEE_STORAGE_DIR + '/datasets';
+  const base = path.join(storageDir, 'datasets');
   const dirPath = path.join(base, req.params.id);
 
   try {
@@ -68,8 +86,10 @@ app.delete('/datasets/:id', async (req, res) => {
   }
 });
 
+/* DELETE ALL RUNS
+--------------------------------------------------- */
 app.delete('/datasets', async (_req, res) => {
-  const base = process.env.CRAWLEE_STORAGE_DIR + '/datasets';
+  const base = path.join(storageDir, 'datasets');
   try {
     const entries = await fs.readdir(base);
     const runDirs = entries.filter(d => d.startsWith('run-'));
@@ -82,4 +102,6 @@ app.delete('/datasets', async (_req, res) => {
   }
 });
 
+/* START SERVER
+--------------------------------------------------- */
 app.listen(3000, () => console.log('Crawler-API listening on :3000'));
