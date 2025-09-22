@@ -30,6 +30,10 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         return document.body.innerText.trim();
       });
 
+      // Regex: vind alleen Nederlandse 06-nummers (+31 of 0 varianten)
+      const phoneRegex = /(\+31|0)6\s?\d{8}/g;
+      const phones = textContent.match(phoneRegex) || [];
+
       // Collect all unique absolute links, cleaned + only internal
       const links = await page.$$eval('a[href]', (els, startHost) => {
         return [...new Set(
@@ -58,10 +62,11 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         )];
       }, startHost);
 
-      // Save URL, text and links to dataset
+      // Save URL, text, phones and links to dataset
       await itemsDs.pushData({
         url: request.url,
         textContent,
+        phones,
         links
       });
     }
