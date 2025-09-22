@@ -17,16 +17,15 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
 
     requestHandler: async ({ page, request }) => {
-      // Clean out scripts/styles to get cleaner text
+      // Clean out scripts/styles/templates/noscript for cleaner text
       await page.evaluate(() => {
         document.querySelectorAll('script,style,template,noscript')
           .forEach(el => el.remove());
       });
 
-      // Extract visible text from main content area or body
+      // Extract visible text from the full body
       const textContent = await page.evaluate(() => {
-        const root = document.querySelector('main,article,#content');
-        return (root ?? document.body).innerText.trim();
+        return document.body.innerText.trim();
       });
 
       // Collect all unique absolute links
