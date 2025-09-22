@@ -11,6 +11,8 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
   // Open dataset in the correct storageDir
   const itemsDs = await Dataset.open(runId, { config });
 
+  const startHost = new URL(startUrl).hostname;
+
   // Important: pass config as the second argument, not inside options
   const crawler = new PlaywrightCrawler({
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
@@ -28,8 +30,8 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         return document.body.innerText.trim();
       });
 
-      // Collect all unique absolute links, cleaned
-      const links = await page.$$eval('a[href]', els => {
+      // Collect all unique absolute links, cleaned + only internal
+      const links = await page.$$eval('a[href]', (els, startHost) => {
         return [...new Set(
           els
             .map(a => a.href.trim())
@@ -45,8 +47,16 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
                 return h;
               }
             })
+            // Only keep links on the same hostname as the start URL
+            .filter(h => {
+              try {
+                return new URL(h).hostname === startHost;
+              } catch {
+                return false;
+              }
+            })
         )];
-      });
+      }, startHost);
 
       // Save URL, text and links to dataset
       await itemsDs.pushData({
