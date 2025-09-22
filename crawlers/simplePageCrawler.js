@@ -1,29 +1,36 @@
 // simplePageCrawler.js
-import { PlaywrightCrawler, Dataset } from 'crawlee';
+/* SIMPLE PAGE CRAWLER WITH STORAGE DIR SUPPORT
+--------------------------------------------------- */
+import { PlaywrightCrawler, Dataset, Configuration } from 'crawlee';
 
-export async function simplePageCrawler(startUrl, runId, options = {}) {
-  const itemsDs = await Dataset.open(runId);
+/* CRAWLER FUNCTION
+--------------------------------------------------- */
+export async function simplePageCrawler(startUrl, runId, options = {}, storageDir = '/app/storage') {
+  // Ensure Crawlee uses the same storage directory as the API
+  const config = new Configuration({ storageDir });
+
+  // Open the dataset in the correct storageDir
+  const itemsDs = await Dataset.open(runId, { config });
 
   const crawler = new PlaywrightCrawler({
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
-    // 'ignoreRobotsTxt' is hier volledig verwijderd, omdat het problemen veroorzaakt.
-    // Standaard respecteert Crawlee robots.txt.
+    config, // pass config to crawler
 
     requestHandler: async ({ page, request }) => {
-      // My comment: clean out scripts/styles to get cleaner text
-      await page.evaluate(() =>
+      // Clean out scripts/styles to get cleaner text
+      await page.evaluate(() => {
         document.querySelectorAll('script,style,template,noscript')
-               .forEach(el => el.remove())
-      );
+          .forEach(el => el.remove());
+      });
 
-      // My comment: extract visible text from the main content area or body
+      // Extract visible text from main content area or body
       const textContent = await page.evaluate(() => {
         const root = document.querySelector('main,article,#content');
         return (root ?? document.body).innerText.trim();
       });
 
-      // Haal alle absolute links op de pagina op
+      // Collect all unique absolute links
       const links = await page.$$eval('a[href]', els =>
         [...new Set(
           els.map(a => a.href.trim())
@@ -31,18 +38,17 @@ export async function simplePageCrawler(startUrl, runId, options = {}) {
         )]
       );
 
-      // Sla alleen de URL, tekstinhoud en links op
+      // Save URL, text and links to dataset
       await itemsDs.pushData({
         url: request.url,
         textContent,
         links
       });
 
-      // Geen enqueueLinks, want we crawlen maar één pagina
+      // No enqueueLinks – only crawl the given page
     }
   });
 
-  // Start de crawler met alleen de opgegeven URL
-  // De optie 'ignoreRobotsTxt' is ook hier verwijderd.
+  // Start the crawler with only the given URL
   await crawler.run([{ url: startUrl }]);
 }
