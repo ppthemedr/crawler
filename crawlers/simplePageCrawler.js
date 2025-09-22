@@ -11,10 +11,10 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
   // Open dataset in the correct storageDir
   const itemsDs = await Dataset.open(runId, { config });
 
+  // Important: pass config as the second argument, not inside options
   const crawler = new PlaywrightCrawler({
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
-    config,
 
     requestHandler: async ({ page, request }) => {
       // Clean out scripts/styles to get cleaner text
@@ -43,10 +43,8 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         textContent,
         links
       });
-
-      // No enqueueLinks – only crawl the given page
     }
-  });
+  }, config); // <-- pass Configuration here, not inside options
 
   // Start the crawler with only the given URL
   await crawler.run([{ url: startUrl }]);
