@@ -13,7 +13,6 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
 
   const startHost = new URL(startUrl).hostname;
 
-  // Important: pass config as the second argument, not inside options
   const crawler = new PlaywrightCrawler({
     navigationTimeoutSecs: options.navigationTimeoutSecs ?? 30,
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
@@ -34,6 +33,17 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
       const phoneRegex = /(\+31|0)6\s?\d{8}/g;
       const phones = textContent.match(phoneRegex) || [];
 
+      // Detect jQuery version if present
+      const jqueryVersion = await page.evaluate(() => {
+        if (window.jQuery && window.jQuery.fn && window.jQuery.fn.jquery) {
+          return window.jQuery.fn.jquery;
+        }
+        if (window.$ && window.$.fn && window.$.fn.jquery) {
+          return window.$.fn.jquery;
+        }
+        return null;
+      });
+
       // Collect all unique absolute links, cleaned + only internal
       const links = await page.$$eval('a[href]', (els, startHost) => {
         return [...new Set(
@@ -43,15 +53,13 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
             .map(h => {
               try {
                 const u = new URL(h);
-                // Strip querystring en hash
-                u.search = '';
+                // Strip alleen anchors (#something), laat querystrings staan
                 u.hash = '';
                 return u.toString();
               } catch {
                 return h;
               }
             })
-            // Only keep links on the same hostname as the start URL
             .filter(h => {
               try {
                 return new URL(h).hostname === startHost;
@@ -62,15 +70,16 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         )];
       }, startHost);
 
-      // Save URL, text, phones and links to dataset
+      // Save URL, text, phones, links, and jqueryVersion to dataset
       await itemsDs.pushData({
         url: request.url,
         textContent,
         phones,
-        links
+        links,
+        jqueryVersion
       });
     }
-  }, config); // <-- pass Configuration here, not inside options
+  }, config);
 
   // Start the crawler with only the given URL
   await crawler.run([{ url: startUrl }]);
