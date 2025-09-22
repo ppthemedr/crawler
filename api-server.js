@@ -68,6 +68,31 @@ app.post('/run', async (req, res) => {
     });
 });
 
+/* GET ONE DATASET
+--------------------------------------------------- */
+app.get('/datasets/:id', async (req, res) => {
+  const base = path.join(storageDir, 'datasets');
+  const dirPath = path.join(base, req.params.id);
+
+  try {
+    // check of directory bestaat
+    await fs.access(dirPath);
+
+    const ds = await Dataset.open(req.params.id, { storageDir });
+    const { items } = await ds.getData();
+
+    res.json({
+      status: 'ok',
+      datasetId: req.params.id,
+      itemsCount: items.length,
+      items
+    });
+  } catch (e) {
+    res.status(404).json({ error: 'Dataset not found', id: req.params.id });
+  }
+});
+
+
 /* GET STATUS OF ONE RUN
 --------------------------------------------------- */
 app.get('/datasets/:id/status', (req, res) => {
