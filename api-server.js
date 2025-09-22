@@ -11,20 +11,18 @@ import { simplePageCrawler } from './crawlers/simplePageCrawler.js';
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-/* AUTHENTICATION (X-API-Token or Basic Auth)
+/* AUTHENTICATION (BEARER TOKEN)
 --------------------------------------------------- */
 const API_TOKEN = process.env.API_TOKEN ?? '';
 app.use((req, res, next) => {
-  if (!API_TOKEN) return next();
-  if (req.headers['x-api-token'] === API_TOKEN) return next();
+  if (!API_TOKEN) return next(); // no auth if no token set
   const auth = req.headers.authorization || '';
-  if (auth.startsWith('Basic ')) {
-    const [, b64] = auth.split(' ');
-    const pass = Buffer.from(b64, 'base64').toString().split(':')[1];
-    if (pass === API_TOKEN) return next();
-  }
-  res.setHeader('WWW-Authenticate', 'Basic realm="Crawler"');
-  return res.status(401).json({ error: 'unauthorized' });
+  if (auth === `Bearer ${API_TOKEN}`) return next();
+  return res.status(401).json({
+    error: 'unauthorized',
+    details: 'Invalid or missing Bearer token',
+    hint: 'Set Authorization: Bearer <API_TOKEN>'
+  });
 });
 
 /* STORAGE DIR CONFIGURATION
@@ -35,26 +33,52 @@ const storageDir = '/app/storage';
 --------------------------------------------------- */
 app.use('/datasets', express.static(path.join(storageDir, 'datasets')));
 
-/* START NEW CRAWL
+/* SIMPLE IN-MEMORY STATUS TRACKER
+--------------------------------------------------- */
+const runs = {}; // { runId: { status: 'running'|'done'|'error', error?:string } }
+
+/* START NEW CRAWL (ASYNC)
 --------------------------------------------------- */
 app.post('/run', async (req, res) => {
   const { crawler_type, startUrl, options = {} } = req.body;
   if (crawler_type !== 'simple' || !startUrl) {
     return res.status(400).json({
-      error: 'crawler_type must be "simple" and startUrl required'
+      error: 'bad_request',
+      details: 'crawler_type must be "simple" and startUrl is required'
     });
   }
+
   const runId = `run-${Date.now()}`;
-  try {
-    await simplePageCrawler(startUrl, runId, options);
-    const ds     = await Dataset.open(runId);
-    const { items } = await ds.getData();
-    const pages = items.map(i => i.url);
-    res.json({ status: 'ok', datasetId: runId, pages, items });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+  runs[runId] = { status: 'running' };
+
+  // respond immediately
+  res.json({ status: 'running', datasetId: runId });
+
+  // run in background
+  simplePageCrawler(startUrl, runId, options)
+    .then(async () => {
+      const ds = await Dataset.open(runId);
+      const { items } = await ds.getData();
+      runs[runId] = { status: 'done' };
+      console.log(`[${runId}] completed with ${items.length} items`);
+    })
+    .catch(err => {
+      console.error(`[${runId}] error:`, err);
+      runs[runId] = { status: 'error', error: err.message };
+    });
+});
+
+/* GET STATUS OF ONE RUN
+--------------------------------------------------- */
+app.get('/datasets/:id/status', (req, res) => {
+  const runId = req.params.id;
+  if (!runs[runId]) {
+    return res.status(404).json({
+      error: 'not_found',
+      details: `No run found with id ${runId}`
+    });
   }
+  res.json({ datasetId: runId, ...runs[runId] });
 });
 
 /* LIST ALL RUNS
@@ -63,26 +87,33 @@ app.get('/datasets', async (_req, res) => {
   const base = path.join(storageDir, 'datasets');
   try {
     const entries = await fs.readdir(base, { withFileTypes: true });
-    const runs = entries
+    const foundRuns = entries
       .filter(d => d.isDirectory() && d.name.startsWith('run-'))
       .map(d => d.name);
-    res.json({ runs, count: runs.length });
+    res.json({ runs: foundRuns, count: foundRuns.length });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({
+      error: 'internal_error',
+      details: e.message,
+      hint: 'Check storageDir permissions and disk availability'
+    });
   }
 });
 
 /* DELETE ONE RUN
 --------------------------------------------------- */
 app.delete('/datasets/:id', async (req, res) => {
-  const base = path.join(storageDir, 'datasets');
-  const dirPath = path.join(base, req.params.id);
-
+  const dirPath = path.join(storageDir, 'datasets', req.params.id);
   try {
     await fs.rm(dirPath, { recursive: true, force: true });
+    delete runs[req.params.id];
     res.json({ status: 'deleted', id: req.params.id });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({
+      error: 'delete_failed',
+      details: e.message,
+      hint: `Check if dataset ${req.params.id} exists and permissions`
+    });
   }
 });
 
@@ -95,10 +126,14 @@ app.delete('/datasets', async (_req, res) => {
     const runDirs = entries.filter(d => d.startsWith('run-'));
     for (const id of runDirs) {
       await fs.rm(path.join(base, id), { recursive: true, force: true });
+      delete runs[id];
     }
     res.json({ status: 'deleted-all', count: runDirs.length });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({
+      error: 'delete_all_failed',
+      details: e.message
+    });
   }
 });
 
