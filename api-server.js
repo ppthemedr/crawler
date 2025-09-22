@@ -3,7 +3,7 @@
 import express from 'express';
 import fs      from 'fs/promises';
 import path    from 'path';
-import { Dataset } from 'crawlee';
+import { Dataset, Configuration } from 'crawlee';
 import { simplePageCrawler } from './crawlers/simplePageCrawler.js';
 
 /* INIT APP
@@ -28,6 +28,7 @@ app.use((req, res, next) => {
 /* STORAGE DIR CONFIGURATION
 --------------------------------------------------- */
 const storageDir = '/app/storage';
+const config = new Configuration({ storageDir });
 
 /* SERVE DATASETS AS STATIC FILES
 --------------------------------------------------- */
@@ -56,9 +57,9 @@ app.post('/run', async (req, res) => {
   res.json({ status: 'running', datasetId: runId });
 
   // run in background
-  simplePageCrawler(startUrl, runId, { storageDir, ...options })
+  simplePageCrawler(startUrl, runId, options, storageDir)
     .then(async () => {
-      const ds = await Dataset.open(runId, { storageDir });
+      const ds = await Dataset.open(runId, { config });
       const { items } = await ds.getData();
       runs[runId] = { status: 'done' };
       console.log(`[${runId}] completed with ${items.length} items`);
@@ -73,7 +74,7 @@ app.post('/run', async (req, res) => {
 --------------------------------------------------- */
 app.get('/datasets/:id', async (req, res) => {
   try {
-    const ds = await Dataset.open(req.params.id, { storageDir });
+    const ds = await Dataset.open(req.params.id, { config });
     const { items } = await ds.getData();
 
     res.json({
