@@ -44,6 +44,11 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         return null;
       });
 
+      // Detect WordPress (check for "wp-content" in raw HTML)
+      const isWordPress = await page.evaluate(() => {
+        return document.documentElement.outerHTML.includes('wp-content');
+      });
+
       // Collect all unique absolute links, cleaned + only internal
       const links = await page.$$eval('a[href]', (els, startHost) => {
         return [...new Set(
@@ -70,13 +75,14 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         )];
       }, startHost);
 
-      // Save URL, text, phones, links, and jqueryVersion to dataset
+      // Save URL, text, phones, links, jqueryVersion, and WordPress detection
       await itemsDs.pushData({
         url: request.url,
         textContent,
         phones,
         links,
-        jqueryVersion
+        jqueryVersion,
+        isWordPress
       });
     }
   }, config);
