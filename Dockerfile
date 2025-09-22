@@ -8,4 +8,5 @@ RUN npm install --omit=dev
 COPY . .
 
 EXPOSE 3000
-CMD ["node", "api-server.js"]
+
+CMD sh -c "chmod -R 777 ${CRAWLEE_STORAGE_DIR:-/app/storage} && node api-server.js"
