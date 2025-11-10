@@ -5,7 +5,6 @@ import fs      from 'fs/promises';
 import path    from 'path';
 import { Dataset, Configuration } from 'crawlee';
 import { simplePageCrawler } from './crawlers/simplePageCrawler.js';
-import { simplePageCrawlerWithExternalLinks } from './crawlers/simplePageCrawlerWithExternalLinks.js';
 
 /* INIT APP
 --------------------------------------------------- */
@@ -44,10 +43,10 @@ const runs = {};
 --------------------------------------------------- */
 app.post('/run', async (req, res) => {
   const { crawler_type, startUrl, options = {} } = req.body;
-  if (!['simple', 'simple_with_external'].includes(crawler_type) || !startUrl) {
+  if (crawler_type !== 'simple' || !startUrl) {
     return res.status(400).json({
       error: 'bad_request',
-      details: 'crawler_type must be "simple" or "simple_with_external" and startUrl is required'
+      details: 'crawler_type must be "simple" and startUrl is required'
     });
   }
 
@@ -58,11 +57,7 @@ app.post('/run', async (req, res) => {
   res.json({ status: 'running', datasetId: runId });
 
   // run in background
-  const crawlerFn = crawler_type === 'simple'
-    ? simplePageCrawler
-    : simplePageCrawlerWithExternalLinks;
-
-  crawlerFn(startUrl, runId, options, storageDir)
+  simplePageCrawler(startUrl, runId, options, storageDir)
     .then(async () => {
       const ds = await Dataset.open(runId, { config });
       const { items } = await ds.getData();
