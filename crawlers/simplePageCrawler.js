@@ -18,29 +18,22 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
     maxRequestRetries:     options.maxRequestRetries     ?? 3,
 
     requestHandler: async ({ page, request }) => {
-      // Clean out scripts/styles/templates/noscript for cleaner text
+      // Remove non-content elements for cleaner text
       await page.evaluate(() => {
-        document.querySelectorAll('script,style,template,noscript')
-          .forEach(el => el.remove());
+        document.querySelectorAll('script,style,template,noscript').forEach(el => el.remove());
       });
 
       // Extract visible text from the full body
-      const textContent = await page.evaluate(() => {
-        return document.body.innerText.trim();
-      });
+      const textContent = await page.evaluate(() => document.body.innerText.trim());
 
-      // Regex: vind alleen Nederlandse 06-nummers (+31 of 0 varianten)
+      // Regex: Dutch 06 numbers (+31 or 0 variants)
       const phoneRegex = /(\+31|0)6\s?\d{8}/g;
       const phones = textContent.match(phoneRegex) || [];
 
       // Detect jQuery version if present
       const jqueryVersion = await page.evaluate(() => {
-        if (window.jQuery && window.jQuery.fn && window.jQuery.fn.jquery) {
-          return window.jQuery.fn.jquery;
-        }
-        if (window.$ && window.$.fn && window.$.fn.jquery) {
-          return window.$.fn.jquery;
-        }
+        if (window.jQuery && window.jQuery.fn && window.jQuery.fn.jquery) return window.jQuery.fn.jquery;
+        if (window.$ && window.$.fn && window.$.fn.jquery)               return window.$.fn.jquery;
         return null;
       });
 
@@ -49,41 +42,53 @@ export async function simplePageCrawler(startUrl, runId, options = {}, storageDi
         return document.documentElement.outerHTML.includes('wp-content');
       });
 
-      // Collect all unique absolute links, cleaned + only internal
-      const links = await page.$$eval('a[href]', (els, startHost) => {
-        return [...new Set(
-          els
-            .map(a => a.href.trim())
-            .filter(h => h.startsWith('http'))
-            .map(h => {
-              try {
-                const u = new URL(h);
-                // Strip alleen anchors (#something), laat querystrings staan
-                u.hash = '';
-                return u.toString();
-              } catch {
-                return h;
-              }
-            })
-            .filter(h => {
-              try {
-                return new URL(h).hostname === startHost;
-              } catch {
-                return false;
-              }
-            })
-        )];
-      }, startHost);
+      // Collect all unique absolute http(s) links, strip only hashes
+      const allLinks = await page.$$eval('a[href]', (els) => {
+        const urls = new Set();
+        for (const a of els) {
+          const raw = a.getAttribute('href')?.trim();
+          if (!raw) continue;
+          try {
+            const u = new URL(raw, location.href);
+            if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
+            u.hash = '';
+            urls.add(u.toString());
+          } catch {
+            // ignore invalid hrefs
+          }
+        }
+        return [...urls];
+      });
 
-      // Save URL, text, phones, links, jqueryVersion, and WordPress detection
-      await itemsDs.pushData({
+      // Split into internal / external
+      const internalLinks = [];
+      const externalLinks = [];
+      for (const href of allLinks) {
+        try {
+          const host = new URL(href).hostname;
+          if (host === startHost) internalLinks.push(href);
+          else                    externalLinks.push(href);
+        } catch {
+          // ignore
+        }
+      }
+
+      // Build output (backward compatible): "links" stays internal,
+      // optionally add "externalLinks" when requested via options flag
+      const record = {
         url: request.url,
         textContent,
         phones,
-        links,
+        links: internalLinks,
         jqueryVersion,
         isWordPress
-      });
+      };
+      if (options.includeExternalLinks) {
+        record.externalLinks = externalLinks;
+      }
+
+      // Save
+      await itemsDs.pushData(record);
     }
   }, config);
 
